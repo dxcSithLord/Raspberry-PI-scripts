@@ -213,7 +213,8 @@ else
 fi
 
 # 9. fstab persistence -------------------------------------------------------
-if grep -q '>>> setup-sftp-rhel8.sh managed block >>>' "$FSTAB" 2>/dev/null; then
+# -F: match the marker as a literal fixed string (it is not a regex).
+if grep -qF '>>> setup-sftp-rhel8.sh managed block >>>' "$FSTAB" 2>/dev/null; then
   ok "$FSTAB contains the managed mount block (persists across reboot)"
 else
   [ "$MOUNT_TYPE" = "none" ] && info "$FSTAB has no managed block (MOUNT_TYPE=none)" \

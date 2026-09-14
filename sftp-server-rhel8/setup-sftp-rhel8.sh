@@ -106,7 +106,19 @@ done
 
 # ------------------------------------------------------------ input validation --
 # [STD: OWASP input validation / NIST SI-10] refuse malformed identifiers early.
+# POSIX Extended Regular Expressions (ERE) via 'grep -E'.
+#   Ref: IEEE Std 1003.1-2017 (POSIX.1), Base Definitions §9.4 (EREs).
+#
+# valid_name: 1-32 chars; first is a lowercase letter or '_', rest add digits
+# and '-'. Mirrors the shadow-utils useradd NAME_REGEX / login.defs convention
+# (distro default `^[a-z_][a-z0-9_-]*$`), lower-cased for hardening, and caps at
+# 32 = the useradd name limit (sysconf LOGIN_NAME_MAX). The '-' is last in the
+# bracket so it is a literal, not a range.
+#   Ref: useradd(8) & login.defs(5) (shadow-utils, chkname.c is_valid_user_name);
+#        POSIX.1-2017 §3.437 "User Name" (Portable Filename Character Set).
 valid_name()   { printf '%s' "$1" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$'; }
+# valid_number: one or more ASCII digits (unsigned integer). Range is checked
+# separately where it matters (see SFTP_PORT below).
 valid_number() { printf '%s' "$1" | grep -Eq '^[0-9]+$'; }
 
 valid_name "$SFTP_GROUP" || die "invalid group '$SFTP_GROUP'"
@@ -118,6 +130,8 @@ for n in "$SFTP_GID" "$SFTP_UID_BASE" "$SFTP_PORT" \
          "$PW_MAX_AGE" "$PW_MIN_AGE" "$PW_WARN_AGE"; do
   valid_number "$n" || die "expected a number, got '$n'"
 done
+# A digit string is not enough for a TCP port - bound it to 1..65535.
+[ "$SFTP_PORT" -ge 1 ] && [ "$SFTP_PORT" -le 65535 ] || die "SFTP_PORT must be 1-65535, got '$SFTP_PORT'"
 case "$USE_CHROOT"          in yes|no) ;; *) die "USE_CHROOT must be yes or no" ;; esac
 case "$ENABLE_AUDIT"        in yes|no) ;; *) die "ENABLE_AUDIT must be yes or no" ;; esac
 case "$ALLOW_PASSWORD_AUTH" in yes|no) ;; *) die "ALLOW_PASSWORD_AUTH must be yes or no" ;; esac
@@ -136,7 +150,10 @@ fi
 [ "$MOUNT_TYPE" != "smb" ] || case "$MOUNT_SOURCE" in //*) ;; *) die "SMB MOUNT_SOURCE must look like //host/share" ;; esac
 
 # Indirect per-user lookup: PUBKEY_<user> / PWHASH_<user> (user sanitised to a
-# valid shell identifier: any char outside [A-Za-z0-9_] becomes '_').
+# valid shell identifier: any char outside [A-Za-z0-9_] becomes '_'). The
+# pattern is a glob bracket expression in bash pattern substitution, not an ERE.
+#   Ref: Bash Reference Manual §3.5.3 Shell Parameter Expansion (${var//pat/rep})
+#        and §3.5.8.1 Pattern Matching; shell name charset per POSIX.1-2017 §3.235.
 user_var() {
   local prefix="$1" user="$2" san name
   san="${user//[^A-Za-z0-9_]/_}"
@@ -145,6 +162,10 @@ user_var() {
 }
 
 # Hashed passwords only - never accept plaintext at rest. [STD: NIST IA-5]
+# The '$6$' prefix is the crypt(5) identifier for a SHA-512 password hash; the
+# check is a glob (case pattern), not a regex.
+#   Ref: crypt(5) man page (Linux man-pages) - '$6$' = SHA-512; also
+#        `openssl passwd -6` / `mkpasswd -m sha-512` which emit this format.
 check_hash() {
   local val="$1" who="$2"
   [ -z "$val" ] && return 0
@@ -324,6 +345,9 @@ if [ -n "$FSTAB_BLOCK" ]; then
   tmp="$(mktemp)"
   # Drop any previous managed block; keep everything else verbatim, and trim
   # trailing blank lines so the file stays byte-stable across re-runs.
+  # awk ERE '/[^[:space:]]/' matches a line with any non-whitespace char, used
+  # to remember the last non-blank line so trailing blanks are dropped.
+  #   Ref: POSIX.1-2017 awk (regex) and Base Definitions §9.3.5 ([:space:] class).
   awk -v b="$FSTAB_BEGIN" -v e="$FSTAB_END" '
     $0==b {skip=1; next}
     $0==e {skip=0; next}
