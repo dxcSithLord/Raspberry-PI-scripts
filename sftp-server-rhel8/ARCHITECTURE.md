@@ -62,9 +62,10 @@ flowchart TB
 
 **What happens for one user**
 
-1. `sftpuser1` connects FTP over SSH. `sshd` matches `Group sftpusers`, forces
-   `internal-sftp` (no shell), and — if `USE_CHROOT=yes` — chroots into
-   `/sftp-chroot/sftpuser1`.
+1. `sftpuser1` opens an SFTP file-transfer session — SSH's file-transfer
+   subsystem, **not** an interactive SSH shell. `sshd` matches `Group
+   sftpusers`, forces `internal-sftp` (no shell), and — if `USE_CHROOT=yes` —
+   chroots into `/sftp-chroot/sftpuser1`.
 2. Inside the jail the user sees only `data/`, which is a **bind mount** of
    `/sftp-data/sftpuser1` on the network share.
 3. The user uploads (`put`) and downloads (`get`) freely within `data/`
