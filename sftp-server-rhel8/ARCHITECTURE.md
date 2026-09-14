@@ -23,6 +23,7 @@ config file (`sftp-rhel8.conf`) or environment variables — see
 |------|------|
 | `setup-sftp-rhel8.sh` | Idempotent provisioning script. Creates the group and accounts, mounts the share (fstab + optional SMB credentials), builds per-user data dirs, optional chroot jails with bind mounts, SSH/SFTP hardening, and optional audit rules. |
 | `sftp-rhel8.conf.example` | Template for all tunables and secrets (copy to `/etc/sftp-server/sftp-rhel8.conf`, `chmod 0600`). |
+| `check-sftp-compliance.sh` | Read-only compliance monitor. Loads the same config and verifies the live structure and permissions still match; exits non-zero on drift so cron/a systemd timer can alert. See §10. |
 
 
 ---
@@ -275,3 +276,74 @@ sudo SFTP_USERS="alice bob" MOUNT_TYPE=smb \
 
 Per-user auth uses `PUBKEY_<user>` / `PWHASH_<user>` variables (any `-` in the
 user name becomes `_`), e.g. `PUBKEY_sftpuser1="ssh-ed25519 AAAA... alice"`.
+
+---
+
+## 10. Compliance monitoring
+
+`check-sftp-compliance.sh` is a **read-only** monitor that re-checks the live
+system against the same configuration and reports drift. It changes nothing.
+
+It verifies: the group and its GID; each user's UID, primary group and
+`nologin` shell; `/sftp-data` ownership/mode and mount state; each per-user data
+directory (`<user>:sftpusers 0700` on NFS/local; existence + group on SMB); the
+chroot jail roots (`root:root 0755` — the security-critical "not group/other
+writable" rule sshd enforces) and their `data/` bind mounts;
+`authorized_keys/<user>` (root-owned, not user-writable); the SMB credentials
+file (`root:root 0600`); the sshd drop-in (mode `0600` and `sshd -t` valid); the
+`/etc/fstab` managed block (reboot persistence); and the audit rule file when
+`ENABLE_AUDIT=yes`.
+
+Output is `[ OK ] / [WARN] / [FAIL]` per check plus a summary. **Exit codes:**
+`0` = compliant (warnings allowed), `1` = one or more failures, `2` = usage or
+config error. Warnings cover operational states that are not drift (e.g. the
+share is momentarily unmounted); failures cover real permission/structure
+problems.
+
+```bash
+sudo ./check-sftp-compliance.sh            # full report
+sudo ./check-sftp-compliance.sh -q         # only WARN/FAIL lines (for cron mail)
+```
+
+### Scheduling
+
+Run it regularly and alert only when the exit code is non-zero.
+
+**Option A — cron** (mails output to root only on failure, thanks to `-q` and a
+non-zero exit):
+
+```cron
+# /etc/cron.d/sftp-compliance   (root:root 0644)
+MAILTO=secops@example.com
+30 6 * * *  root  /usr/local/sbin/check-sftp-compliance.sh -q || echo "SFTP compliance drift detected on $(hostname)"
+```
+
+**Option B — systemd timer** (install the script to `/usr/local/sbin` first):
+
+```ini
+# /etc/systemd/system/sftp-compliance.service
+[Unit]
+Description=SFTP structure & permission compliance check
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/check-sftp-compliance.sh -q
+```
+
+```ini
+# /etc/systemd/system/sftp-compliance.timer
+[Unit]
+Description=Run the SFTP compliance check daily
+[Timer]
+OnCalendar=*-*-* 06:30:00
+Persistent=true
+[Install]
+WantedBy=timers.target
+```
+
+```bash
+sudo install -m 0755 check-sftp-compliance.sh /usr/local/sbin/
+sudo systemctl enable --now sftp-compliance.timer
+# A failing run marks the service failed; surface it with:
+#   systemctl --failed  (or an OnFailure= handler / journald alerting)
+systemctl status sftp-compliance.service   # last result and output
+```
