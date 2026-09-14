@@ -1,6 +1,8 @@
 # Raspberry-PI-scripts
 The is a placeholder for general scripts and files that are used in Raspberry Pi OS
 
+**[sftp-server/](./sftp-server/)** — hardened, SFTP-only file-exchange server for RHEL 9/10 (chroot jails, least-privilege internal/external accounts, real-time SHA-256 checksums, DISA-STIG/NIST/CIS/FIPS controls). See [sftp-server/ARCHITECTURE.md](./sftp-server/ARCHITECTURE.md).
+
 ~~LXDE-pi_panel - See https://thepihut.com/blogs/raspberry-pi-tutorials/how-to-lock-your-raspberry-pi-screen for description.~~
 There was a small issue with LightGDM - Use Ctrl-Alt-F7 and Ctrl-Alt-F8 to switch between lock screen and X Windows session.
 

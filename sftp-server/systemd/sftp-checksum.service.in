@@ -1,0 +1,35 @@
+# sftp-checksum.service  -  generate manifest and promote files inbound->outbound.
+# Rendered from this template by setup-sftp-server.sh (@TOKENS@ substituted).
+#
+# Oneshot: started by sftp-checksum.path. Runs the checksum script under a
+# hardened, least-privilege sandbox.
+#   Standards: NIST SP 800-53 AC-6 / CM-7 (least functionality); the
+#   systemd sandbox options below reduce the service's kernel/FS attack surface.
+[Unit]
+Description=Generate SHA-256 manifest and promote SFTP files to outbound
+After=local-fs.target
+
+[Service]
+Type=oneshot
+ExecStart=@SCRIPT@ @INBOUND@ @OUTBOUND@ @MANIFEST@
+
+# --- Least-privilege sandbox (CIS / DISA-STIG hardening) --------------------
+# Needs root only to move files between the two chroot trees and set ownership.
+# Everything else is locked down.
+ProtectSystem=strict
+ReadWritePaths=@INBOUND@ @OUTBOUND@
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+NoNewPrivileges=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE

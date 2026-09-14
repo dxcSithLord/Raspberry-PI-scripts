@@ -1,0 +1,18 @@
+# sftp-checksum.path  -  watch the internal user's inbound directory.
+# Rendered from this template by setup-sftp-server.sh (@TOKENS@ substituted).
+#
+# Uses inotify (via systemd) to react in real time when the internal user
+# finishes writing a file, then starts sftp-checksum.service.
+#   Standards: NIST SP 800-53 SI-7 (integrity) - triggers checksumming on change.
+[Unit]
+Description=Watch SFTP inbound dir and trigger SHA-256 checksum/promotion
+After=local-fs.target
+
+[Path]
+# Fire when files are created/modified/closed in the inbound directory.
+PathModified=@INBOUND@
+# Coalesce bursts of events into a single service start.
+Unit=sftp-checksum.service
+
+[Install]
+WantedBy=multi-user.target
