@@ -24,8 +24,6 @@ config file (`sftp-rhel8.conf`) or environment variables — see
 | `setup-sftp-rhel8.sh` | Idempotent provisioning script. Creates the group and accounts, mounts the share (fstab + optional SMB credentials), builds per-user data dirs, optional chroot jails with bind mounts, SSH/SFTP hardening, and optional audit rules. |
 | `sftp-rhel8.conf.example` | Template for all tunables and secrets (copy to `/etc/sftp-server/sftp-rhel8.conf`, `chmod 0600`). |
 
-There is no checksum service and no systemd unit templates — persistence is
-handled entirely through `/etc/fstab` (network mount + per-user bind mounts).
 
 ---
 
@@ -39,7 +37,7 @@ flowchart TB
         U3(("sftpuser3"))
     end
 
-    U1 & U2 & U3 -->|"SFTP only (upload + download)"| SSHD["sshd\nMatch Group sftpusers\nForceCommand internal-sftp"]
+    U1 & U2 & U3 -->|"SFTP only\n (upload + download)"| SSHD["sshd\nMatch Group sftpusers\nForceCommand\n internal-sftp"]
 
     subgraph JAILS["Optional chroot: /sftp-chroot/%u  (root:root 0755)"]
         J1["/sftp-chroot/sftpuser1\n└─ data/  (bind mount)"]
@@ -47,7 +45,7 @@ flowchart TB
         J3["/sftp-chroot/sftpuser3\n└─ data/  (bind mount)"]
     end
 
-    SSHD -->|"ChrootDirectory /sftp-chroot/%u"| JAILS
+    SSHD -->|" ChrootDirectory \n /sftp-chroot/%u "| JAILS
 
     subgraph SHARE["Network mount: /sftp-data  (NFSv4 preferred, or SMB)"]
         D1["/sftp-data/sftpuser1"]
@@ -55,24 +53,23 @@ flowchart TB
         D3["/sftp-data/sftpuser3"]
     end
 
-    J1 -. "bind (NOT symlink)" .-> D1
-    J2 -. "bind" .-> D2
-    J3 -. "bind" .-> D3
+    J1 -. " bind " .-> D1
+    J2 -. " bind " .-> D2
+    J3 -. " bind " .-> D3
 
     SHARE -->|"/etc/fstab _netdev\n(persists across reboot)"| REMOTE[("NFS / SMB server")]
 ```
 
 **What happens for one user**
 
-1. `sftpuser1` connects over SSH. `sshd` matches `Group sftpusers`, forces
+1. `sftpuser1` connects FTP over SSH. `sshd` matches `Group sftpusers`, forces
    `internal-sftp` (no shell), and — if `USE_CHROOT=yes` — chroots into
    `/sftp-chroot/sftpuser1`.
 2. Inside the jail the user sees only `data/`, which is a **bind mount** of
    `/sftp-data/sftpuser1` on the network share.
 3. The user uploads (`put`) and downloads (`get`) freely within `data/`
    (umask `0027` → new files `0640`).
-4. Files land directly on the NFS/SMB share, where the external side collects
-   or delivers them out of band. No checksum is computed.
+4. Files land directly on the NFS/SMB share.
 
 ---
 
