@@ -91,7 +91,18 @@ done
 
 # ------------------------------------------------------------ input validation --
 # [STD: OWASP input validation / NIST SI-10] refuse malformed identifiers early.
+# POSIX Extended Regular Expressions (ERE) via 'grep -E'.
+#   Ref: IEEE Std 1003.1-2017 (POSIX.1), Base Definitions §9.4 (EREs).
+#
+# valid_name: 1-32 chars; first is a lowercase letter or '_', rest add digits
+# and '-'. Mirrors the shadow-utils useradd NAME_REGEX / login.defs convention
+# (distro default `^[a-z_][a-z0-9_-]*$`), lower-cased for hardening, and caps at
+# 32 = the useradd name limit (sysconf LOGIN_NAME_MAX). The '-' is last in the
+# bracket so it is a literal, not a range.
+#   Ref: useradd(8) & login.defs(5) (shadow-utils, chkname.c is_valid_user_name);
+#        POSIX.1-2017 §3.437 "User Name" (Portable Filename Character Set).
 valid_name() { printf '%s' "$1" | grep -Eq '^[a-z_][a-z0-9_-]{0,31}$'; }
+# valid_uidgid: one or more ASCII digits (unsigned integer) for UID/GID/port.
 valid_uidgid() { printf '%s' "$1" | grep -Eq '^[0-9]+$'; }
 
 for u in "$INTERNAL_USER" "$EXTERNAL_USER" "$SFTP_GROUP"; do
@@ -107,6 +118,10 @@ case "$OUTBOUND_DIR" in */*|*..*|"") die "invalid OUTBOUND_DIR" ;; esac
 case "$CHECKSUM_FILE" in */*|*..*|"") die "invalid CHECKSUM_FILE" ;; esac
 
 # Hashed passwords only - never accept plaintext at rest. [STD: NIST IA-5]
+# The '$6$' prefix is the crypt(5) identifier for a SHA-512 password hash; the
+# check is a glob (case pattern), not a regex.
+#   Ref: crypt(5) man page (Linux man-pages) - '$6$' = SHA-512; also
+#        `openssl passwd -6` / `mkpasswd -m sha-512` which emit this format.
 check_hash() {
   local val="$1" who="$2"
   [ -z "$val" ] && return 0
