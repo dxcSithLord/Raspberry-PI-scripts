@@ -31,6 +31,7 @@ flowchart LR
     INT(("Internal user\nint_xfer\nSSH key / hashed pw")) -->|SFTP write| IN
     subgraph JAIL_INT["Chroot: /srv/sftp/int_xfer  (root:root 0755)"]
         IN["inbound/\nint_xfer:sftpusers 2770\nADD / DELETE / WRITE"]
+        INOUT["outbound/  (bind mount)\nint_xfer owner: manage/DELETE"]
     end
 
     IN -. inotify PathModified .-> PATH["sftp-checksum.path"]
@@ -38,11 +39,18 @@ flowchart LR
     SVC -->|"1. sha256sum -> SHA256SUMS\n2. atomic move"| OUT
 
     subgraph JAIL_EXT["Chroot: /srv/sftp/ext_xfer  (root:root 0755)"]
-        OUT["outbound/\nroot:sftpusers 2750\nREAD-ONLY for external\n+ SHA256SUMS manifest"]
+        OUT["outbound/\nint_xfer:sftpusers 2750\nREAD-ONLY for external\n+ SHA256SUMS manifest"]
     end
 
+    INOUT -. same inode (bind) .- OUT
+    INT -->|"SFTP manage/delete"| INOUT
     OUT -->|SFTP read + verify| EXT(("External user\next_xfer\nSSH key / hashed pw"))
 ```
+
+The single canonical `outbound/` directory lives in the external jail and is
+**bind-mounted** into the internal jail, so the internal user can delete
+delivered files there while the external user keeps a read-only view of the
+same files (enforced by the `2750` group `r-x` permission).
 
 **Sequence for one file**
 
@@ -68,16 +76,21 @@ external account can never even *see* the inbound staging area.
 | Path | Owner:Group | Mode | Internal user | External user |
 |------|-------------|------|---------------|---------------|
 | `/srv/sftp/<user>` (jail roots) | `root:root` | `0755` | — (chroot anchor) | — (chroot anchor) |
-| `inbound/` | `int_xfer:sftpusers` | `2770` | read/write/**delete** | **no access** (different jail) |
-| `outbound/` | `root:sftpusers` | `2750` | (via service) | **read-only** (group `r-x`, no write) |
-| files in `outbound/` | `int_xfer:sftpusers` | `0640` | — | read (group) |
+| `inbound/` (internal jail) | `int_xfer:sftpusers` | `2770` | read/write/**delete** | **no access** (different jail) |
+| `outbound/` (external jail, canonical) | `int_xfer:sftpusers` | `2750` | owner rwx via bind mount | **read-only** (group `r-x`, no write) |
+| `outbound/` (internal jail) | *bind mount of the above* | — | manage/**delete** | — (not in this jail) |
+| files in `outbound/` | `int_xfer:sftpusers` | `0640` | manage/delete | read (group) |
 
 * **Internal writes, external reads:** internal owns `inbound/`; promoted files
   are group-readable (`0640`, group `sftpusers`) and `outbound/` grants the
   external user only `r-x`.
-* **File management from the internal account only:** `outbound/` is
-  `root`-owned with no group write bit, so the external user cannot add or
-  delete anything. The internal user manages `inbound/`.
+* **File management from the internal account only:** the external user has no
+  write bit on `outbound/`, so it can never add or delete — it can only read.
+  The internal user owns `outbound/` and reaches it through a bind mount into
+  its own jail, so **only** the internal account can delete delivered files.
+* **Integrity note:** the manifest is rebuilt from the full directory on each
+  promotion, so it self-heals after an internal deletion on the next upload;
+  an admin can also re-run `sftp-checksum.sh` to refresh it immediately.
 * **chroot requirement:** a `ChrootDirectory` must be owned by `root` and not
   writable by group/other, or `sshd` refuses the session — hence the `0755`
   root-owned jail roots with the writable working dir one level down.

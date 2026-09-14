@@ -230,13 +230,21 @@ install -d -m 0755 -o root -g root "$CHROOT_EXT"
 # promotion) the external reader inherit the shared group.
 install -d -m 2770 -o "$INTERNAL_USER" -g "$SFTP_GROUP" "$INBOUND_PATH"
 
-# outbound: external READ-ONLY. Owned by root so the external account cannot
-# add or delete - satisfies "file management only from the internal account".
-# 2750 => group (external) gets r-x (list+read), no write.
-install -d -m 2750 -o root -g "$SFTP_GROUP" "$OUTBOUND_PATH"
+# outbound: canonical copy lives in the EXTERNAL jail. Owned by the INTERNAL
+# user so that account can manage (delete) delivered files via the bind mount
+# created below; 2750 gives the external user group r-x only (read/list, NEVER
+# write or delete) - satisfies "file management only from the internal account".
+install -d -m 2750 -o "$INTERNAL_USER" -g "$SFTP_GROUP" "$OUTBOUND_PATH"
+
+# Bind-mount point inside the INTERNAL jail so the internal user can reach the
+# same outbound directory to delete delivered files. Empty root-owned dir; the
+# systemd .mount unit (section 8) mounts the canonical outbound over it.
+# [STD: NIST AC-3/AC-6 - internal manages, external stays read-only]
+INT_OUTBOUND_MP="${CHROOT_INT}/${OUTBOUND_DIR}"
+install -d -m 0755 -o root -g root "$INT_OUTBOUND_MP"
 
 log "Chroot trees ready:"
-info "  internal jail : $CHROOT_INT  (writes -> $INBOUND_PATH)"
+info "  internal jail : $CHROOT_INT  (writes -> $INBOUND_PATH, manages -> $OUTBOUND_DIR/)"
 info "  external jail : $CHROOT_EXT  (reads  <- $OUTBOUND_PATH)"
 
 # =============================================================================
@@ -400,6 +408,34 @@ systemctl daemon-reload
 systemctl enable --now sftp-checksum.path
 log "Enabled real-time checksum watcher (sftp-checksum.path)."
 
+# --- Bind-mount outbound into the internal jail ------------------------------
+# Lets the internal user reach the canonical outbound dir to DELETE delivered
+# files, while the external user keeps its own read-only view. Same inode both
+# sides; external access stays limited by the 2750 group r-x permission.
+# The .mount unit filename MUST equal the escaped mount-point path.
+MOUNT_UNIT="$(systemd-escape -p --suffix=mount "$INT_OUTBOUND_MP")"
+cat > "/etc/systemd/system/${MOUNT_UNIT}" <<EOF
+# Managed by setup-sftp-server.sh - bind outbound into the internal jail.
+# [STD: NIST AC-3/AC-6 - internal manages delivered files; external read-only]
+[Unit]
+Description=Bind SFTP outbound into internal jail (${INTERNAL_USER})
+After=local-fs.target
+RequiresMountsFor=${OUTBOUND_PATH}
+
+[Mount]
+What=${OUTBOUND_PATH}
+Where=${INT_OUTBOUND_MP}
+Type=none
+Options=bind
+
+[Install]
+WantedBy=multi-user.target
+EOF
+chmod 0644 "/etc/systemd/system/${MOUNT_UNIT}"
+systemctl daemon-reload
+systemctl enable --now "$MOUNT_UNIT"
+log "Bind-mounted outbound into internal jail ($INT_OUTBOUND_MP)."
+
 # =============================================================================
 # 9. SUMMARY
 # =============================================================================
@@ -407,8 +443,8 @@ cat <<EOF
 
 ============================ SFTP SERVER READY ============================
   Group            : ${SFTP_GROUP} (gid ${SFTP_GID})
-  Internal (write) : ${INTERNAL_USER}  ->  ${INBOUND_PATH}
-  External (read)  : ${EXTERNAL_USER}  ->  ${OUTBOUND_PATH}
+  Internal (write) : ${INTERNAL_USER}  ->  ${INBOUND_DIR}/ (write) + ${OUTBOUND_DIR}/ (manage/delete)
+  External (read)  : ${EXTERNAL_USER}  ->  ${OUTBOUND_DIR}/ (read-only)
   Chroot base      : ${SFTP_BASE}
   Manifest         : ${OUTBOUND_PATH}/${CHECKSUM_FILE}
   SSH drop-in      : ${DROPIN}
@@ -418,6 +454,9 @@ cat <<EOF
   Flow: internal uploads to inbound/  ->  checksum service hashes + moves the
         file to outbound/  ->  external reads and can verify with:
           sha256sum -c ${CHECKSUM_FILE}
+  The internal user also sees outbound/ (bind mount) and may delete delivered
+  files there; the manifest refreshes on the next upload, or run:
+          ${CHK_INSTALL} ${INBOUND_PATH} ${OUTBOUND_PATH} ${CHECKSUM_FILE}
 
   Review any [WARN] lines above: they mark controls (FIPS, SELinux, auditd)
   that are NOT enforced unless enabled on this host.
