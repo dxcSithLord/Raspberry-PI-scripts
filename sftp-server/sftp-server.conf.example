@@ -1,0 +1,56 @@
+# =============================================================================
+# sftp-server.conf  -  configuration for setup-sftp-server.sh
+# -----------------------------------------------------------------------------
+# Copy to /etc/sftp-server/sftp-server.conf and edit. The setup script reads
+# this file, and any matching environment variable OVERRIDES the value here.
+#
+#   Standards: NIST SP 800-53 IA-5 (authenticator management), CM-6 (config).
+#   Secrets:   NEVER commit real values. This is a template (.example) only.
+#              Store the live file root-owned, 0600 (the script enforces this).
+# =============================================================================
+
+# --- Transfer group shared by both accounts --------------------------------
+SFTP_GROUP="sftpusers"
+SFTP_GID="4000"                 # fixed GID keeps deployments reproducible
+
+# --- Chroot base -------------------------------------------------------------
+# Each user gets its OWN chroot tree under this base so the external user can
+# never see the inbound area (least privilege, NIST AC-6).
+SFTP_BASE="/srv/sftp"
+
+# --- Internal (writer / file manager) account -------------------------------
+INTERNAL_USER="int_xfer"
+INTERNAL_UID="4001"
+# Public key(s) for the internal user (PREFERRED auth - NIST IA-5, DISA-STIG).
+# Provide the full authorized_keys line(s). Leave empty to skip key install.
+INTERNAL_PUBKEY=""
+
+# --- External (reader) account ----------------------------------------------
+EXTERNAL_USER="ext_xfer"
+EXTERNAL_UID="4002"
+EXTERNAL_PUBKEY=""
+
+# --- Optional password auth (DISCOURAGED; keys preferred) -------------------
+# If set, these MUST be pre-hashed SHA-512 crypt strings (start with '$6$'),
+# never plaintext. Generate with:  openssl passwd -6   (or: mkpasswd -m sha-512)
+# Leave empty to keep password login disabled for that account.
+INTERNAL_PWHASH=""
+EXTERNAL_PWHASH=""
+
+# Master switch. "no" (default) => password auth disabled in sshd, keys only.
+# Set to "yes" ONLY if you must accept the hashes above.
+ALLOW_PASSWORD_AUTH="no"
+
+# --- Directory names inside each chroot -------------------------------------
+INBOUND_DIR="inbound"           # internal writes here (add/delete)
+OUTBOUND_DIR="outbound"         # external reads here (read-only)
+CHECKSUM_FILE="SHA256SUMS"      # single aggregate manifest per directory
+
+# --- SSH listen port (22 default; change if your STIG mandates it) ----------
+SFTP_PORT="22"
+
+# --- Password rotation policy (days) ----------------------------------------
+# Applied with chage. STIG/CIS typically require <=60 day max age.
+PW_MAX_AGE="60"
+PW_MIN_AGE="1"
+PW_WARN_AGE="7"

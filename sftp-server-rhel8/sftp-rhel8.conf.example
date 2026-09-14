@@ -1,0 +1,94 @@
+# =============================================================================
+# sftp-rhel8.conf  -  configuration for setup-sftp-rhel8.sh (RHEL 8)
+# -----------------------------------------------------------------------------
+# Copy to /etc/sftp-server/sftp-rhel8.conf and edit. The setup script reads
+# this file, and any matching environment variable OVERRIDES the value here.
+#
+#   Standards: NIST SP 800-53 IA-5 (authenticator management), CM-6 (config).
+#   Secrets:   NEVER commit real values. This is a template (.example) only.
+#              Store the live file root-owned, 0600.
+# =============================================================================
+
+# --- Transfer group shared by all SFTP users --------------------------------
+SFTP_GROUP="sftpusers"
+SFTP_GID="4000"                 # fixed GID keeps deployments reproducible
+
+# --- The SFTP users (internal only; upload + download) ----------------------
+# Space-separated list. Each gets its own /sftp-data/<user> directory.
+SFTP_USERS="sftpuser1 sftpuser2 sftpuser3"
+# UIDs are assigned deterministically as SFTP_UID_BASE + position in the list
+# (sftpuser1=4001, sftpuser2=4002, ...). Keep the range free of other accounts.
+SFTP_UID_BASE="4001"
+
+# --- Storage layout ---------------------------------------------------------
+SFTP_DATA_BASE="/sftp-data"     # single share mounted here; per-user subdirs
+SFTP_CHROOT_BASE="/sftp-chroot" # jail roots (only used when USE_CHROOT=yes)
+
+# --- Optional chroot jail ----------------------------------------------------
+# yes => each user is locked into /sftp-chroot/<user>, seeing only its own
+#        data/ (a bind mount of /sftp-data/<user>). Strongly recommended.
+# no  => users are not chrooted; SFTP home is /sftp-data/<user> and they can
+#        browse the wider filesystem read-only over SFTP.
+USE_CHROOT="yes"
+
+# --- Storage mount ----------------------------------------------------------
+# MOUNT_TYPE: nfs | smb | none
+#   nfs  => NFSv4 preferred (real per-user ownership is preserved).
+#   smb  => CIFS; one shared service account (see SMB_* below). Files present
+#           as group SFTP_GID via mount options; per-user isolation then comes
+#           from the chroot + separate subdirs, NOT from Unix ownership.
+#   none => you mount SFTP_DATA_BASE yourself; the script only provisions
+#           users/dirs/chroot and verifies the mount is present.
+MOUNT_TYPE="nfs"
+
+# Source share:
+#   nfs: "nfs-server.example.com:/export/sftp"
+#   smb: "//smb-server.example.com/sftp-share"
+MOUNT_SOURCE=""
+
+# NFS mount options (NFSv4.2 preferred; hardened with nosuid,nodev,noexec).
+NFS_OPTIONS="rw,hard,vers=4.2,_netdev,nosuid,nodev,noexec"
+
+# --- SMB / CIFS (only used when MOUNT_TYPE=smb) ------------------------------
+# One shared SMB service account. If SMB_CRED_FILE does not exist, the script
+# creates it (root:root 0600) from SMB_USERNAME/SMB_PASSWORD/SMB_DOMAIN below.
+# Leave the username/password empty to have a PLACEHOLDER written that you then
+# edit by hand (recommended, so secrets never sit in this config file).
+SMB_CRED_FILE="/etc/sftp-server/smb.cred"
+SMB_USERNAME=""
+SMB_PASSWORD=""
+SMB_DOMAIN=""
+# CIFS mount options. uid=0 + gid=<group>, group-writable modes, so every
+# chrooted sftp user can read/write its own subtree via the shared mount.
+SMB_OPTIONS="vers=3.1.1,uid=0,forceuid,gid=4000,forcegid,file_mode=0660,dir_mode=0770,_netdev,nosuid,nodev,noexec"
+
+# --- Per-user authentication (PREFERRED: keys - NIST IA-5, DISA-STIG) --------
+# Provide one variable per user, named PUBKEY_<user> (any '-' in the user name
+# becomes '_'). Give the full authorized_keys line. Leave unset to skip.
+PUBKEY_sftpuser1=""
+PUBKEY_sftpuser2=""
+PUBKEY_sftpuser3=""
+
+# --- Optional password auth (DISCOURAGED; keys preferred) -------------------
+# Named PWHASH_<user>. MUST be a pre-hashed SHA-512 crypt string (starts with
+# '$6$'), never plaintext. Generate with:  openssl passwd -6
+# Only honoured when ALLOW_PASSWORD_AUTH="yes".
+PWHASH_sftpuser1=""
+PWHASH_sftpuser2=""
+PWHASH_sftpuser3=""
+
+# Master switch. "no" (default) => password auth disabled in sshd, keys only.
+ALLOW_PASSWORD_AUTH="no"
+
+# --- Optional transfer auditing ---------------------------------------------
+# yes => install auditd watch on SFTP_DATA_BASE (needs auditd active).
+ENABLE_AUDIT="no"
+
+# --- SSH listen port (22 default; change if your STIG mandates it) ----------
+SFTP_PORT="22"
+
+# --- Password rotation policy (days) ----------------------------------------
+# Applied with chage when a password hash is set. STIG/CIS: <=60 day max age.
+PW_MAX_AGE="60"
+PW_MIN_AGE="1"
+PW_WARN_AGE="7"
