@@ -113,6 +113,8 @@ for n in "$SFTP_GID" "$INTERNAL_UID" "$EXTERNAL_UID" "$SFTP_PORT" \
          "$PW_MAX_AGE" "$PW_MIN_AGE" "$PW_WARN_AGE"; do
   valid_uidgid "$n" || die "expected a number, got '$n'"
 done
+# A digit string is not enough for a TCP port - bound it to 1..65535.
+[ "$SFTP_PORT" -ge 1 ] && [ "$SFTP_PORT" -le 65535 ] || die "SFTP_PORT must be 1-65535, got '$SFTP_PORT'"
 case "$INBOUND_DIR"  in */*|*..*|"") die "invalid INBOUND_DIR"  ;; esac
 case "$OUTBOUND_DIR" in */*|*..*|"") die "invalid OUTBOUND_DIR" ;; esac
 case "$CHECKSUM_FILE" in */*|*..*|"") die "invalid CHECKSUM_FILE" ;; esac
